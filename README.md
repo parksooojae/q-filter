@@ -6,67 +6,86 @@ Various quantum algorithms build upon this idea, like Grover's search and Shor's
 
 We seek to explore the setup, implementation details and computational advantages of QSVT in a quantum inspired molecular analysis context. Here we use a molecular Hamiltonian matrix `H` as the input matrix. Conceptually, `H` is a matrix that encodes the electronic structure of a molecule, and it plays the role of the generic data matrix `X` to which the QSVT polynomial filter is applied. In the accompanying code, `H` is constructed from a molecular representation such as a SMILES string, but any procedure that produces a suitable Hamiltonian matrix can be used. This application attempts to apply a quantum inspired polynomial filter to molecular Hamiltonians to extract rich structural features that can improve property prediction and chemical insight. We run this against a classical Chebyshev filter to benchmark runtime performances and quality of information extracted.
 
+Here is a clean, copy-pastable rewrite with consistent formatting, indentation, and no Markdown quirks:
 
-QSVT (Quantum Singular Value Transformation) is useful only when the Hamiltonian is large and accessed as an oracle.
+---
 
-Sublinear scaling in matrix dimension (polylog(N))
-If a matrix H ∈ ℂⁿˣⁿ is block-encoded efficiently:
+**QSVT (Quantum Singular Value Transformation): Why It Matters**
 
-classical: applying a polynomial f(H) costs O(N³) (dense) or O(N·nnz) (sparse)
+**1. Sublinear scaling in matrix dimension (polylog(N))**
+If a Hamiltonian ( H \in \mathbb{C}^{N \times N} ) is efficiently block-encoded:
 
-QSVT: applying a degree-d polynomial f(H) costs O(d · polylog N)
+* **Classical:** applying a polynomial ( f(H) ) costs
 
-This is the fundamental advantage.
+  * ( O(N^3) ) for dense matrices
+  * ( O(N \cdot \text{nnz}) ) for sparse matrices
 
-Efficient spectral filtering (projectors onto eigenvalue bands)
+* **QSVT:** applying a degree-( d ) polynomial ( f(H) ) costs
+
+  * ( O(d \cdot \mathrm{polylog}(N)) )
+
+This sublinear dependence on matrix size is the key advantage.
+
+---
+
+**2. Efficient spectral filtering (projectors onto eigenvalue bands)**
 QSVT can implement:
 
-projectors onto eigenvalue intervals,
+* projectors onto eigenvalue intervals
+* high-pass / low-pass spectral filters
+* smooth approximations to (\text{sign}(H))
+* Fermi–Dirac filters (thermal states)
 
-high-pass / low-pass spectral filters,
+Classically, this requires diagonalizing very large matrices.
 
-smooth approximations to sign(H),
+---
 
-Fermi–Dirac filters (thermal states).
+**3. Inverting large matrices**
+Quantum linear system solvers (QLSAs) rely on QSVT.
 
-Classically, this requires diagonalizing huge matrices.
+Given a block-encoding of ( H ):
 
-Inverting huge matrices
-Quantum linear system solvers (QLSAs) are built on QSVT.
+* **Classical:** solving ( Hx = b ) costs ( O(N^3) )
+* **QSVT:** approximate inversion costs
+  [
+  \mathrm{poly}(\log N,, \kappa,, 1/\varepsilon)
+  ]
 
-Given a block-encoding of H:
+This yields an exponential speedup in ( N ).
 
-classical: solving Hx=b takes O(N³)
+---
 
-QSVT: inversion with cost poly(log N, κ, 1/ε)
+**4. Quantum Gibbs sampling (thermal states)**
+Classically, sampling from
+[
+\rho \propto e^{-\beta H}
+]
+is extremely expensive for large ( N ).
 
-This is exponential in N speedup.
+QSVT can approximate ( e^{-\beta H} ) using polynomial approximations in
+[
+\mathrm{poly}(\log N)
+]
+time.
 
-Quantum Gibbs sampling (thermal states)
-Classical sampling from:
+---
 
-𝜌 ∝ 𝑒 − 𝛽 𝐻 ρ∝e −βH
+**5. No need to store ( H ) explicitly**
+Useful for:
 
-is extremely expensive for large N.
+* huge periodic systems
+* tight-binding models with billions of orbitals
+* graph Laplacians
+* protein-scale Hamiltonians
 
-QSVT can approximate exp(-βH) using polynomial approximations in poly(log N) time.
+QSVT accesses ( H ) only through a block-encoding oracle, not via explicit matrices.
 
-No need to store H explicitly
-This matters for:
+---
 
-huge periodic systems
+**6. Exponentially faster polynomial approximations**
+Approximating ( f(H) ) using Chebyshev polynomials:
 
-tight-binding models with billions of orbitals
+* **Classical:** requires repeated dense matrix multiplications
+* **QSVT:** uses only ( O(d) ) calls to a block-encoded ( H )
 
-graph Laplacians
-
-protein-scale Hamiltonians
-
-QSVT accesses H through a block-encoding oracle, not as a matrix.
-
-Exponentially faster polynomial approximations
-Approximating a function f(H) via Chebyshev polynomials:
-
-classical: requires large dense matrix multiplications
-
-QSVT: implemented with O(d) calls to a block-encoded H
+---
