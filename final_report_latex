@@ -1,0 +1,511 @@
+
+
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{bm}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{backgrounds,fit,decorations.pathreplacing,calc}
+\newcommand{\ket}[1]{\ensuremath{\left|#1\right\rangle}}
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Define colors for syntax highlighting
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codeframe}{RGB}{220,220,220}
+\definecolor{codekeyword}{RGB}{0,112,192}
+\definecolor{codecomment}{RGB}{106,153,85}
+\definecolor{codestring}{RGB}{163,21,21}
+\definecolor{codefunction}{RGB}{111,66,193}
+% Define the code style
+\lstdefinestyle{qsvtstyle}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{codekeyword}\bfseries,
+    commentstyle=\color{codecomment}\itshape,
+    stringstyle=\color{codestring},
+    emphstyle=\color{codefunction},
+    emph={normalize_hamiltonian, pad_to_power_of_two, compute_phase_angles, BlockEncode, QSVT, PCPhase, apply_P, apply_P_tilde, build_pi_huckel_hamiltonian, get_pi_system_atoms, parse_molecule, spectral_norm, embed, chebyshev_coefficients, QSP_solver, transform_angles, qsvt_circuit, extract_features, measure_state, compute_moments, eigenvalues, norm},
+    keywords={def, return, for, if, else, in, range, import},
+    frame=single,
+    rulecolor=\color{codeframe},
+    framesep=8pt,
+    xleftmargin=12pt,
+    xrightmargin=12pt,
+    aboveskip=1em,
+    belowskip=1em,
+    showstringspaces=false,
+    breaklines=true,
+    tabsize=4,
+    columns=flexible,
+}
+
+\begin{document}
+
+\begin{center}
+\rule{\textwidth}{0.4pt}\\[0.6em]
+{\LARGE \textbf{Quantum Singular Value Transformation (QSVT):\\
+From Survey to Spectral Filtering for Molecular Hamiltonians}}\\[0.8em]
+\rule{\textwidth}{0.4pt}\\[0.8em]
+\textbf{Alkis Ioannis Toutziaridis} \quad \textbf{Logan P.\ Krause} \quad \textbf{Christopher Park}
+
+\end{center}
+
+\begin{abstract}
+QSVT is an algorithmic framework that, given a block encoding of a matrix, applies
+a polynomial transform \(p\) to singular values while preserving its singular vectors.
+We suggest a new application for QSVT in the context of quantum enhanced molecular
+analysis. By leveraging polynomial spectral filtering via QSVT, we demonstrate how
+molecular Hamiltonians can be processed to extract informative structural features that
+classically require costly spectral decompositions. Our approach applies quantum
+inspired QSVT filters to normalized H\"uckel Hamiltonians and compares their
+performance against classical Chebyshev based filters. This establishes a pathway for
+incorporating QSVT based spectral transformations into molecular feature extraction
+pipelines, highlighting both the algorithmic structure of QSVT and its potential
+advantages for chemical property prediction.
+\newline
+
+\end{abstract}
+
+\section{Introduction}
+
+Spectral filtering is a technique in which a polynomial transformation is applied to the eigenvalues or
+singular values of a matrix to emphasize, suppress, or isolate specific spectral regions. In molecular
+settings, such filters can highlight chemically meaningful subspaces, enhance the separation of bonding
+and antibonding states, or extract structural signatures tied to electronic behavior. These filters ultimately
+serve to transform raw Hamiltonians into a representation where relevant features become more
+numerically or analytically accessible.
+
+Classical polynomial filtering techniques, such as Chebyshev based spectral transforms, require repeated
+matrix vector multiplications or explicit manipulation of dense matrices. For molecular Hamiltonians of
+dimension \(m \times m\), a single dense matrix matrix multiplication scales on the order of \(m^{3}\)
+(each of the \(m^{2}\) output entries is a dot product of length \(m\)). To apply a polynomial of degree \(d\)
+at the operator level, one needs \(O(d)\) such multiplications, thus a total computation cost of
+\(O(dm^{3})\) for classical methods. This scaling cost limits the Chebyshev filtering scheme's applicability for high resolution
+spectral analysis or extensive molecular datasets. As the target polynomial degree increases, the cost
+compounds further because each additional Chebyshev iteration performs another full matrix application.
+
+Quantum Singular Value Transformation provides a path around this bottleneck by reformulating
+polynomial filtering in terms of controlled unitary sequences rather than explicit matrix powers.
+Once a block encoding of the Hamiltonian is available, implementing a degree \(d\) polynomial
+requires \(O(d)\) applications of the block encoding unitary, with each application acting on
+\(O(\log m)\) qubits. The total circuit complexity is therefore \(O(d \cdot \mathrm{polylog}\, m)\), compared to the
+classical cost of \(O(dm^{3})\) for dense matrix--vector multiplications. This contrast motivates exploring QSVT style polynomial filtering in molecular analysis settings where
+large Hamiltonians make classical spectral methods expensive.
+
+\section{QSVT Algorithmic Framework}
+
+\noindent\textbf{Input:}
+\begin{itemize}
+\item A block encoding \(U\) acting on ancilla plus system registers, such that
+\[
+U =
+\begin{bmatrix}
+X & * \\
+* & *
+\end{bmatrix},
+\qquad
+\|X\| \le 1 .
+\]
+\item A target polynomial \(P(x)\) that satisfies the QSVT admissibility conditions.
+\item A phase sequence \(\{\phi_k\}_{k=1}^{d}\) computed by a QSP solver so that the QSVT
+product implements \(P\) on the singular values of \(X\).
+\end{itemize}
+
+\noindent\textbf{Output:} A unitary \(U_{P}\) whose top left block is a block encoding of \(P(X)\).
+
+\subsection*{Definitions}
+
+\noindent
+\[
+\Pi \text{ is the fixed projector that selects the block encoding ancilla subspace.}
+\]
+\[
+\tilde{\Pi} = U^{\dagger} \Pi U.
+\]
+\[
+\Pi_{\phi} = e^{i \phi \Pi},
+\qquad
+\tilde{\Pi}_{\phi} = e^{i \phi \tilde{\Pi}}.
+\]
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+Symbol & Description\\
+\hline
+\(\Pi\) & Fixed projector that selects the reference subspace, usually the block encoding ancilla state.\\
+\(\tilde{\Pi}\) & Conjugated projector \(U^{\dagger} \Pi U\), projects onto the image of \(\Pi\) under \(U^{\dagger}\).\\
+\(\Pi_{\phi}\) & Controlled phase unitary \(e^{i\phi\Pi}\) conditioned on being in the range of \(\Pi\).\\
+\(\tilde{\Pi}_{\phi}\) & Controlled phase unitary \(e^{i\phi\tilde{\Pi}}\) conditioned on being in the range of \(\tilde{\Pi}\).\\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection*{Algorithm}
+
+\begin{enumerate}
+\item Prepare the ancilla register in \(|0\rangle^{\otimes a}\) and the system register in an arbitrary
+state \(|\psi\rangle\). The composite state is
+\[
+|0\rangle^{\otimes a} \otimes |\psi\rangle .
+\]
+
+\item Decompose the target polynomial
+\[
+P(x) = P_{\mathrm{even}}(x) + P_{\mathrm{odd}}(x),
+\]
+where
+\[
+P_{\mathrm{even}}(x) = \frac{1}{2}\bigl(P(x) + P(-x)\bigr),
+\qquad
+P_{\mathrm{odd}}(x) = \frac{1}{2}\bigl(P(x) - P(-x)\bigr).
+\]
+If \(P\) is purely even or purely odd, only the corresponding branch below is used.
+The parity determines the placement of \(U\) and \(U^{\dagger}\) in the QSVT product.
+
+\item \textbf{Even polynomial case.} If \(P(-x) = P(x)\), construct
+\[
+U_{P_{\mathrm{even}}}
+=
+\Pi_{\phi_{1}}
+\left(
+\prod_{k=1}^{d/2 - 1}
+U^{\dagger} \tilde{\Pi}_{\phi_{2k}} U \Pi_{\phi_{2k+1}}
+\right)
+U^{\dagger} \tilde{\Pi}_{\phi_{d}} U .
+\]
+
+\item \textbf{Odd polynomial case.} If \(P(-x) = -P(x)\), construct
+\[
+U_{P_{\mathrm{odd}}}
+=
+\prod_{k=1}^{d/2}
+\Pi_{\phi_{2k-1}} U^{\dagger} \tilde{\Pi}_{\phi_{2k}} U .
+\]
+
+\item \textbf{General polynomials vs Chebyshev polynomials.} If \(P\) has both even and odd components, implement
+QSVT separately for \(P_{\mathrm{even}}\) and \(P_{\mathrm{odd}}\), obtaining block encodings
+of \(P_{\mathrm{even}}(X)\) and \(P_{\mathrm{odd}}(X)\). Combine these block encodings
+using standard block encoding composition rules to obtain a block encoding of \(P(X)\).
+In our application, we use Chebyshev polynomials of a single degree, which are inherently
+pure parity: \(T_{2}(x), T_{4}(x), T_{6}(x), \ldots\) are purely even, while
+\(T_{1}(x), T_{3}(x), T_{5}(x), \ldots\) are purely odd. Thus, only the corresponding
+even or odd branch is required.
+\end{enumerate}
+
+\section{General QSVT Circuit Representation}
+
+The unitary operator in the QSVT construction transforms singular values according to a polynomial
+of a chosen degree. The signal processing operator allows fine tuning of the coefficients of this
+polynomial.
+
+The following is an example where \(a\) is a constant that lies between \(-1\) and \(1\) (it does not have to be a
+matrix). The unitary \(U(a)\) is a block encoded unitary with \(a\) in the top left entry.
+The operator \(S(\cdot)\) is the signal processing operator.
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[thick, x=1cm, y=1cm, every node/.style={font=\small}]
+  % Wire heights
+  \def\yt{0}
+  \def\ym{-1.0}
+  \def\yb{-2.0}
+  
+  % Control circle radius
+  \def\cr{0.15}
+  
+  % Define break points for ellipses
+  \def\breakL{8.6}
+  \def\breakR{9.8}
+  
+  % Draw three horizontal wires with breaks for ellipses
+  % Top wire
+  \draw (0,\yt) -- (\breakL,\yt);
+  \draw (\breakR,\yt) -- (14,\yt);
+  % Middle wire
+  \draw (0,\ym) -- (\breakL,\ym);
+  \draw (\breakR,\ym) -- (14,\ym);
+  % Bottom wire
+  \draw (0,\yb) -- (\breakL,\yb);
+  \draw (\breakR,\yb) -- (14,\yb);
+  
+  % Label on middle wire
+  \node[left] at (0,\ym) {$\ket{0}^{\otimes a}$};
+  
+  % Slashes on middle and bottom wires (indicating multi-qubit)
+  \draw (0.4,\ym+0.15) -- (0.7,\ym-0.15);
+  \draw (0.4,\yb+0.15) -- (0.7,\yb-0.15);
+  
+  % === First control pair ===
+  \filldraw[fill=white, draw=black] (1.2,\yt) circle (\cr);
+  \draw (1.2-\cr,\yt) -- (1.2+\cr,\yt);
+  \draw (1.2,\yt-\cr) -- (1.2,\yt+\cr);
+  \fill (1.2,\ym) circle (0.08);
+  \draw (1.2,\yt-\cr) -- (1.2,\ym);
+  
+  % === First phase gate (with white fill) ===
+  \filldraw[fill=white, draw=black] (1.7,\yt+0.35) rectangle (2.7,\yt-0.35);
+  \node at (2.2,\yt) {$e^{i\phi_{1}\sigma_{z}}$};
+  
+  % === Second control pair ===
+  \filldraw[fill=white, draw=black] (3.2,\yt) circle (\cr);
+  \draw (3.2-\cr,\yt) -- (3.2+\cr,\yt);
+  \draw (3.2,\yt-\cr) -- (3.2,\yt+\cr);
+  \fill (3.2,\ym) circle (0.08);
+  \draw (3.2,\yt-\cr) -- (3.2,\ym);
+  
+  % === First U gate (with white fill) ===
+  \filldraw[fill=white, draw=black] (3.6,\ym+0.35) rectangle (4.6,\yb-0.35);
+  \node at (4.1,0.5*\ym+0.5*\yb) {$U$};
+  
+  % === Third control pair ===
+  \filldraw[fill=white, draw=black] (5.0,\yt) circle (\cr);
+  \draw (5.0-\cr,\yt) -- (5.0+\cr,\yt);
+  \draw (5.0,\yt-\cr) -- (5.0,\yt+\cr);
+  \fill (5.0,\ym) circle (0.08);
+  \draw (5.0,\yt-\cr) -- (5.0,\ym);
+  
+  % === Second phase gate (with white fill) ===
+  \filldraw[fill=white, draw=black] (5.5,\yt+0.35) rectangle (6.5,\yt-0.35);
+  \node at (6.0,\yt) {$e^{i\phi_{2}\sigma_{z}}$};
+  
+  % === Fourth control pair ===
+  \filldraw[fill=white, draw=black] (7.0,\yt) circle (\cr);
+  \draw (7.0-\cr,\yt) -- (7.0+\cr,\yt);
+  \draw (7.0,\yt-\cr) -- (7.0,\yt+\cr);
+  \fill (7.0,\ym) circle (0.08);
+  \draw (7.0,\yt-\cr) -- (7.0,\ym);
+  
+  % === U^{-1} gate (with white fill) ===
+  \filldraw[fill=white, draw=black] (7.4,\ym+0.35) rectangle (8.4,\yb-0.35);
+  \node at (7.9,0.5*\ym+0.5*\yb) {$U^{-1}$};
+  
+  % === Ellipses (in the gap) ===
+  \node at (9.2,\yt) {$\cdots$};
+  \node at (9.2,\ym) {$\cdots$};
+  \node at (9.2,\yb) {$\cdots$};
+  
+  % === Fifth control pair (after ellipses) ===
+  \filldraw[fill=white, draw=black] (10.0,\yt) circle (\cr);
+  \draw (10.0-\cr,\yt) -- (10.0+\cr,\yt);
+  \draw (10.0,\yt-\cr) -- (10.0,\yt+\cr);
+  \fill (10.0,\ym) circle (0.08);
+  \draw (10.0,\yt-\cr) -- (10.0,\ym);
+  
+  % === Last phase gate (with white fill) ===
+  \filldraw[fill=white, draw=black] (10.5,\yt+0.35) rectangle (11.5,\yt-0.35);
+  \node at (11.0,\yt) {$e^{i\phi_{d}\sigma_{z}}$};
+  
+  % === Sixth control pair ===
+  \filldraw[fill=white, draw=black] (12.0,\yt) circle (\cr);
+  \draw (12.0-\cr,\yt) -- (12.0+\cr,\yt);
+  \draw (12.0,\yt-\cr) -- (12.0,\yt+\cr);
+  \fill (12.0,\ym) circle (0.08);
+  \draw (12.0,\yt-\cr) -- (12.0,\ym);
+  
+  % === Final U^{(-1)^{d-1}} gate (with white fill) ===
+  \filldraw[fill=white, draw=black] (12.4,\ym+0.35) rectangle (14,\yb-0.35);
+  \node at (13.2,0.5*\ym+0.5*\yb) {$U^{(-1)^{d-1}}$};
+\end{tikzpicture}
+\caption{Example QSVT circuit where the signal processing operator \(S(\cdot)\) is implemented by
+a sequence of projector controlled phase rotations and applications of \(U(a)\) and \(U(a)^{\dagger}\).}
+\end{figure}
+
+In this example, the composed operator
+\[
+S(-\pi/2)\,U(a)\,S(\pi/2)\,U(a)\,S(0)
+\]
+acts as a polynomial in \(a\), for instance
+\[
+S(-\pi/2)\,U(a)\,S(\pi/2)\,U(a)\,S(0)
+=
+\begin{pmatrix}
+\displaystyle \frac{2a^{2} - 1}{2} & \displaystyle 2a\sqrt{1-a^{2}} \\[1em]
+\displaystyle -2a\sqrt{1-a^{2}} & \displaystyle 2a^{2} - 1
+\end{pmatrix},
+\]
+illustrating how repeated applications of \(U(a)\) and phase rotations generate a controlled
+polynomial transformation.
+\section{The QSVT Filtering Pipeline}
+
+In this application, we provide a Hamiltonian matrix \(H\) as the input matrix (via the
+\newline
+\texttt{build\_pi\_huckel\_hamiltonian} function), which produces the concrete
+matrix that plays the role of \(X\) (the matrix being encoded in a Unitary matrix). This application applies a quantum inspired polynomial filter to
+molecular Hamiltonians to extract rich structural features that can improve property prediction and
+chemical insight. We run this against a classical Chebyshev filter to benchmark runtime performance and
+the quality of extracted information.
+
+\vspace{1em}
+
+\begin{lstlisting}[style=qsvtstyle, title={\textbf{QSVT Molecular Feature Extraction Pipeline}}]
+# ============================================================
+# Step 1: Build Huckel Hamiltonian from molecular structure
+# ============================================================
+def build_pi_huckel_hamiltonian(smiles):
+    mol = parse_molecule(smiles)
+    pi_atoms = get_pi_system_atoms(mol)        # Identify conjugated system
+    H = zeros((n, n))
+    
+    for atom in pi_atoms:
+        H[i,i] = heteroatom_param[atom] * beta  # Diagonal: electronegativity
+    for bond in pi_bonds:
+        H[i,j] = beta                           # Off-diagonal: resonance
+    
+    return H, pi_atoms
+
+# ============================================================
+# Step 2: Normalize Hamiltonian for block encoding
+# ============================================================
+def normalize_hamiltonian(H):
+    sigma_max = spectral_norm(H)               # Largest singular value
+    return H / sigma_max                       # Ensures ||H_norm|| <= 1
+
+# ============================================================
+# Step 3: Pad matrix to power-of-two dimension
+# ============================================================
+def pad_to_power_of_two(H):
+    n = ceil(log2(dim(H)))
+    return embed(H, target_dim=2^n)
+
+# ============================================================
+# Step 4: Compute QSVT phase angles via QSP solver
+# ============================================================
+def compute_phase_angles(degree, method="sym_qsp"):
+    coeffs = chebyshev_coefficients(degree)
+    phases = QSP_solver(coeffs, basis="chebyshev")
+    phases_qsvt = transform_angles(phases, "QSP" -> "QSVT")
+    parity = "even" if degree % 2 == 0 else "odd"
+    return phases_qsvt, parity
+
+# ============================================================
+# Step 5: Construct block encoding unitary
+# ============================================================
+
+H_norm = normalize_hamiltonian(H)
+H_padded = pad_to_power_of_two(H_norm)
+n_qubits = ceil(log2(2 * dim(H_padded)))
+U = BlockEncode(H_padded, wires=range(n_qubits))
+
+# ============================================================
+# Step 6: Build QSVT circuit with projector-controlled phases
+# ============================================================
+def qsvt_circuit(U, phases, parity):
+    if parity == "even":
+        apply_P_tilde(phases[0], signal_wire)
+        for k in range(1, len(phases)-1, 2):
+            apply U
+            apply_P(phases[k], signal_wire)
+            apply U_adjoint
+            apply_P_tilde(phases[k+1], signal_wire)
+        apply U
+    
+    else:  # odd parity
+        for k in range(0, len(phases)-1, 2):
+            apply_P(phases[k], signal_wire)
+            apply U_adjoint
+            apply_P_tilde(phases[k+1], signal_wire)
+            apply U
+    
+    return measure_state()
+
+# ============================================================
+# Step 7: Extract molecular features from filtered state
+# ============================================================
+def extract_features(state, H_original):
+    features = {
+        "state_norm": norm(state),
+        "filtered_spectrum": eigenvalues(P(H_original)),
+        "spectral_moments": compute_moments(state)
+    }
+    return features
+\end{lstlisting}
+
+\vspace{0.5em}
+
+\noindent
+The pipeline above accepts a SMILES string representing a molecule, constructs its H\"uckel
+$\pi$-electron Hamiltonian, and applies a QSVT-based polynomial filter to extract spectral features.
+The block encoding embeds the normalized Hamiltonian into a unitary operator, and the alternating
+sequence of projector-controlled phase gates implements the desired polynomial transformation
+on the singular values. The resulting quantum state encodes filtered spectral information that
+can serve as input to downstream molecular property prediction models.
+
+\section{Classical Chebyshev Filtering Pipeline}
+
+For comparison, we outline the classical approach to polynomial spectral filtering using
+Chebyshev polynomials. Given a Hamiltonian \(H\) and a target polynomial degree \(d\),
+the classical method computes \(T_d(H)\) via the Chebyshev recurrence relation, requiring
+repeated dense matrix multiplications.
+
+\vspace{1em}
+
+\begin{lstlisting}[style=qsvtstyle, title={\textbf{Classical Chebyshev Filtering Pipeline}}]
+# -------------------------------------------------------
+# Step 1: Normalize Hamiltonian to [-1, 1] spectrum
+# -------------------------------------------------------
+def normalize_hamiltonian(H):
+    lambda_min, lambda_max = eigenvalue_bounds(H)
+    H_norm = (2*H - (lambda_max + lambda_min)*I) 
+             / (lambda_max - lambda_min)
+    return H_norm
+
+# -------------------------------------------------------
+# Step 2: Chebyshev recurrence (core computation)
+# -------------------------------------------------------
+def chebyshev_filter(H_norm, degree):
+    m = dim(H_norm)
+    
+    T_prev = I                    # T_0(H) = I
+    T_curr = H_norm               # T_1(H) = H
+    
+    if degree == 0:
+        return T_prev
+    if degree == 1:
+        return T_curr
+    
+    # Recurrence: T_k(x) = 2x*T_{k-1}(x) - T_{k-2}(x)
+    for k in range(2, degree + 1):
+        T_next = 2 * H_norm @ T_curr - T_prev  # O(m^3)
+        T_prev = T_curr
+        T_curr = T_next
+    
+    return T_curr                 # T_d(H_norm)
+
+# -------------------------------------------------------
+# Step 3: Apply filter to extract features
+# -------------------------------------------------------
+def extract_filtered_features(H, degree):
+    H_norm = normalize_hamiltonian(H)
+    T_d_H = chebyshev_filter(H_norm, degree)  # O(d * m^3)
+    
+    features = {
+        "filtered_eigenvalues": eigenvalues(T_d_H),
+        "trace": trace(T_d_H),
+        "spectral_moments": compute_moments(T_d_H)
+    }
+    return features
+\end{lstlisting}
+
+\vspace{0.5em}
+
+\noindent
+The classical pipeline relies on the three-term Chebyshev recurrence
+\(T_k(x) = 2x \cdot T_{k-1}(x) - T_{k-2}(x)\), which requires \(d-1\) matrix--matrix
+multiplications to compute \(T_d(H)\). For an \(m \times m\) dense Hamiltonian, each
+multiplication costs \(O(m^3)\), yielding a total complexity of \(O(dm^3)\). This cubic
+dependence on matrix dimension becomes prohibitive for large molecular systems, motivating
+the QSVT approach described in the following section.
+\section{References}
+
+Quantum Singular Value Transformation and Beyond: Exponential Improvements for Quantum Matrix
+Arithmetics. Available at
+\url{https://dl.acm.org/doi/pdf/10.1145/3313276.3316366}.
+
+Intro to QSVT. Available at
+\url{https://pennylane.ai/qml/demos/tutorial_intro_qsvt}.
+
+\end{document}
